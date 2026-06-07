@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Заявки — админка</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="admin-body">
+
+  <div class="grain" aria-hidden="true"></div>
+
+  <main class="admin">
+    <section class="admin__login" id="login-panel">
+      <div class="admin__card">
+        <p class="admin__eyebrow">Ирина Масалыкина</p>
+        <h1 class="admin__title">Заявки с сайта</h1>
+        <p class="admin__lead">Введите пароль, чтобы посмотреть новые обращения.</p>
+
+        <form class="admin__form" id="login-form">
+          <label class="admin__field">
+            <span class="admin__label">Пароль</span>
+            <input type="password" name="password" class="admin__input" autocomplete="current-password" required>
+          </label>
+          <button type="submit" class="btn btn--primary btn--full">Войти</button>
+          <p class="admin__message" id="login-message" hidden></p>
+        </form>
+      </div>
+    </section>
+
+    <section class="admin__panel" id="dashboard-panel" hidden>
+      <header class="admin__header">
+        <div>
+          <p class="admin__eyebrow">Админка</p>
+          <h1 class="admin__title admin__title--panel">Заявки с сайта</h1>
+        </div>
+        <div class="admin__header-actions">
+          <button type="button" class="btn btn--small" id="refresh-btn">Обновить</button>
+          <button type="button" class="btn btn--small btn--ghost" id="logout-btn">Выйти</button>
+        </div>
+      </header>
+
+      <div class="admin__stats" id="stats">
+        <div class="admin__stat">
+          <span class="admin__stat-value" id="stat-total">0</span>
+          <span class="admin__stat-label">всего</span>
+        </div>
+        <div class="admin__stat admin__stat--new">
+          <span class="admin__stat-value" id="stat-new">0</span>
+          <span class="admin__stat-label">новых</span>
+        </div>
+      </div>
+
+      <div class="admin__filters">
+        <button type="button" class="admin__filter is-active" data-filter="all">Все</button>
+        <button type="button" class="admin__filter" data-filter="new">Только новые</button>
+        <button type="button" class="admin__filter" data-filter="read">Прочитанные</button>
+        <button type="button" class="admin__filter" data-filter="done">Обработанные</button>
+      </div>
+
+      <p class="admin__updated" id="updated-at"></p>
+      <p class="admin__message admin__message--panel" id="panel-message" hidden></p>
+
+      <div class="admin__list" id="bookings-list"></div>
+      <p class="admin__empty" id="empty-state" hidden>Пока заявок нет.</p>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var TOKEN_KEY = 'lend_ira_admin_token';
+      var loginPanel = document.getElementById('login-panel');
+      var dashboardPanel = document.getElementById('dashboard-panel');
+      var loginForm = document.getElementById('login-form');
+      var loginMessage = document.getElementById('login-message');
+      var panelMessage = document.getElementById('panel-message');
+      var bookingsList = document.getElementById('bookings-list');
+      var emptyState = document.getElementById('empty-state');
+      var statTotal = document.getElementById('stat-total');
+      var statNew = document.getElementById('stat-new');
+      var updatedAt = document.getElementById('updated-at');
+      var currentFilter = 'all';
+      var refreshTimer = null;
+
+      function getToken() {
+        return localStorage.getItem(TOKEN_KEY) || '';
+      }
+
+      function setToken(token) {
+        if (token) {
+          localStorage.setItem(TOKEN_KEY, token);
+        } else {
+          localStorage.removeItem(TOKEN_KEY);
+        }
+      }
+
+      function showMessage(el, text, type) {
+        if (!text) {
+          el.hidden = true;
+          el.textContent = '';
+          el.className = el.className.split(' ').filter(function (c) {
+            return !c.startsWith('admin__message--');
+          }).join(' ');
+          return;
+        }
+
+        el.hidden = false;
+        el.textContent = text;
+        el.className = el.className.replace(/admin__message--\w+/g, '').trim();
+        if (type) el.className += ' admin__message--' + type;
+      }
+
+      function formatDate(iso) {
+        try {
+          return new Intl.DateTimeFormat('ru-RU', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }).format(new Date(iso));
+        } catch (error) {
+          return iso;
+        }
+      }
+
+      function statusLabel(status) {
+        if (status === 'read') return 'Прочитана';
+        if (status === 'done') return 'Обработана';
+        return 'Новая';
+      }
+
+      function renderBookings(bookings) {
+        var filtered = bookings.filter(function (item) {
+          if (currentFilter === 'all') return true;
+          return item.status === currentFilter;
+        });
+
+        bookingsList.innerHTML = '';
+
+        if (!filtered.length) {
+          emptyState.hidden = false;
+          emptyState.textContent = currentFilter === 'all'
+            ? 'Пока заявок нет.'
+            : 'В этом фильтре заявок нет.';
+          return;
+        }
+
+        emptyState.hidden = true;
+
+        filtered.forEach(function (booking) {
+          var card = document.createElement('article');
+          card.className = 'admin__booking';
+          if (booking.status === 'new') card.classList.add('admin__booking--new');
+
+          card.innerHTML =
+            '<div class="admin__booking-top">' +
+              '<time class="admin__booking-date" datetime="' + booking.createdAt + '">' + formatDate(booking.createdAt) + '</time>' +
+              '<span class="admin__status admin__status--' + booking.status + '">' + statusLabel(booking.status) + '</span>' +
+            '</div>' +
+            '<h2 class="admin__booking-name">' + escapeHtml(booking.name) + '</h2>' +
+            '<p class="admin__booking-contact"><a href="' + contactHref(booking.contact) + '">' + escapeHtml(booking.contact) + '</a></p>' +
+            '<p class="admin__booking-topic">' + escapeHtml(booking.topic || 'Запрос не указан') + '</p>' +
+            '<div class="admin__booking-actions">' +
+              (booking.status !== 'read' ? '<button type="button" class="admin__action" data-action="read" data-id="' + booking.id + '">Отметить прочитанной</button>' : '') +
+              (booking.status !== 'done' ? '<button type="button" class="admin__action admin__action--done" data-action="done" data-id="' + booking.id + '">Обработана</button>' : '') +
+              (booking.status !== 'new' ? '<button type="button" class="admin__action admin__action--ghost" data-action="new" data-id="' + booking.id + '">Вернуть в новые</button>' : '') +
+            '</div>';
+
+          bookingsList.appendChild(card);
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function contactHref(contact) {
+        var value = String(contact).trim();
+        if (value.indexOf('@') === 0) {
+          return 'https://t.me/' + encodeURIComponent(value.slice(1));
+        }
+        if (value.indexOf('http') === 0) return value;
+        if (/^[\d+\s()-]+$/.test(value)) return 'tel:' + value.replace(/\s/g, '');
+        if (value.indexOf('@') > 0) return 'mailto:' + encodeURIComponent(value);
+        return '#';
+      }
+
+      function apiFetch(path, options) {
+        var token = getToken();
+        var config = options || {};
+        config.headers = Object.assign({
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + token,
+        }, config.headers || {});
+
+        return fetch(path, config).then(function (response) {
+          return response.json().catch(function () {
+            return { ok: false, error: 'Сервер вернул неожиданный ответ' };
+          }).then(function (data) {
+            return { response: response, data: data };
+          });
+        });
+      }
+
+      function showDashboard() {
+        loginPanel.hidden = true;
+        dashboardPanel.hidden = false;
+      }
+
+      function showLogin() {
+        loginPanel.hidden = false;
+        dashboardPanel.hidden = true;
+      }
+
+      function loadBookings() {
+        return apiFetch('/api/admin/bookings')
+          .then(function (result) {
+            if (result.response.status === 401) {
+              setToken('');
+              showLogin();
+              showMessage(loginMessage, 'Сессия истекла. Войдите снова.', 'error');
+              return;
+            }
+
+            if (!result.response.ok || !result.data.ok) {
+              showMessage(panelMessage, result.data.error || 'Не удалось загрузить заявки', 'error');
+              return;
+            }
+
+            showMessage(panelMessage, '', '');
+            statTotal.textContent = result.data.stats.total;
+            statNew.textContent = result.data.stats.new;
+            updatedAt.textContent = 'Обновлено: ' + formatDate(new Date().toISOString());
+            renderBookings(result.data.bookings || []);
+          })
+          .catch(function () {
+            showMessage(panelMessage, 'Не удалось загрузить заявки. Проверьте интернет.', 'error');
+          });
+      }
+
+      function startAutoRefresh() {
+        stopAutoRefresh();
+        refreshTimer = window.setInterval(loadBookings, 30000);
+      }
+
+      function stopAutoRefresh() {
+        if (refreshTimer) {
+          window.clearInterval(refreshTimer);
+          refreshTimer = null;
+        }
+      }
+
+      loginForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        showMessage(loginMessage, '', '');
+
+        var password = String(new FormData(loginForm).get('password') || '');
+
+        fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: password }),
+        })
+          .then(function (response) {
+            return response.json().catch(function () {
+              return { ok: false, error: 'Сервер вернул неожиданный ответ' };
+            }).then(function (data) {
+              return { response: response, data: data };
+            });
+          })
+          .then(function (result) {
+            if (!result.response.ok || !result.data.ok) {
+              showMessage(loginMessage, result.data.error || 'Не удалось войти', 'error');
+              return;
+            }
+
+            setToken(result.data.token);
+            loginForm.reset();
+            showDashboard();
+            loadBookings();
+            startAutoRefresh();
+          })
+          .catch(function () {
+            showMessage(loginMessage, 'Не удалось войти. Проверьте интернет.', 'error');
+          });
+      });
+
+      document.getElementById('refresh-btn').addEventListener('click', loadBookings);
+
+      document.getElementById('logout-btn').addEventListener('click', function () {
+        setToken('');
+        stopAutoRefresh();
+        showLogin();
+      });
+
+      document.querySelectorAll('.admin__filter').forEach(function (button) {
+        button.addEventListener('click', function () {
+          document.querySelectorAll('.admin__filter').forEach(function (item) {
+            item.classList.remove('is-active');
+          });
+          button.classList.add('is-active');
+          currentFilter = button.getAttribute('data-filter');
+          loadBookings();
+        });
+      });
+
+      bookingsList.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-action]');
+        if (!button) return;
+
+        var id = button.getAttribute('data-id');
+        var status = button.getAttribute('data-action');
+
+        apiFetch('/api/admin/bookings', {
+          method: 'PATCH',
+          body: JSON.stringify({ id: id, status: status }),
+        })
+          .then(function (result) {
+            if (!result.response.ok || !result.data.ok) {
+              showMessage(panelMessage, result.data.error || 'Не удалось обновить статус', 'error');
+              return;
+            }
+            loadBookings();
+          })
+          .catch(function () {
+            showMessage(panelMessage, 'Не удалось обновить статус', 'error');
+          });
+      });
+
+      if (getToken()) {
+        showDashboard();
+        loadBookings();
+        startAutoRefresh();
+      }
+    })();
+  </script>
+</body>
+</html>
